@@ -1,36 +1,64 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Petta（ペッタ）- 家族のデジタル掲示板
 
-## Getting Started
+家族が毎日必ず見るリアルタイム共有掲示板です。
+難しい操作は一切なし。メールアドレスだけでログインし、家族共通の合言葉でつながります。
 
-First, run the development server:
+## 主な機能
+- **マジックリンク認証**: パスワード不要、メールのリンクをタップするだけでログイン。
+- **独自招待システム**: 8桁の「合言葉」を発行・入力することで、家族のボードに即座に参加。
+- **リアルタイム同期**: 誰かが付箋を貼ったり剥がしたりすると、家族全員の画面が瞬時に更新。
+- **写真共有**: メッセージと一緒に写真を「ペタッ」と貼れる機能。
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+## 技術スタック
+- **Frontend**: Next.js (App Router), TypeScript, Tailwind CSS
+- **State Management**: Jotai
+- **Backend/Infrastructre**: Supabase
+  - Auth (Magic Link)
+  - Database (PostgreSQL)
+  - Realtime (Postgres Changes)
+  - Storage (Image hosting)
+- **Deployment**: Vercel
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## システム設計のこだわり
+### 1. ユーザーを迷わせない「関所」ロジック
+MiddlewareとNext.jsの`useEffect`を組み合わせ、ログイン直後のプロフィール未設定ユーザーを確実にセットアップ画面へ誘導するルーティングを設計しました。
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### 2. 独自招待フロー
+URL共有ではなく、家族間での会話を想定した「合言葉形式」を採用。DBの制約（Foreign Key）を活かしつつ、`upsert`処理によって不整合の起きないメンバー紐付けを実装しています。
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+### 3. ストレージ管理の最適化
+付箋（レコード）を削除した際、DBからデータを消すだけでなく、Supabase Storageに保存された画像実体も自動でクリーンアップするロジックを組み込み、リソースの無駄遣いを防止しています。
 
-## Learn More
 
-To learn more about Next.js, take a look at the following resources:
+erDiagram
+    %% Supabaseの内部テーブル
+    auth_users ||--|| profiles : "id = id"
+    
+    %% アプリ専用テーブル
+    families ||--o{ profiles : "joined by invite_code"
+    families ||--o{ notes : "owns"
+    profiles ||--o{ notes : "creates"
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+    families {
+        uuid id PK
+        string family_name "ニックネームの家"
+        string invite_code "UK / 8桁ランダム"
+        timestamp created_at
+    }
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+    profiles {
+        uuid id PK "FK to auth.users"
+        uuid family_id FK "どの家族か"
+        string nickname "表示名"
+        timestamp updated_at
+    }
 
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+    notes {
+        uuid id PK
+        uuid family_id FK
+        uuid author_id FK
+        text content "メッセージ本文"
+        string image_url "Storageパス"
+        boolean is_pinned "ピン留め機能"
+        timestamp created_at
+    }
